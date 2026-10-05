@@ -1,0 +1,14 @@
+{
+  "name": "grassquest",
+  "version": "1.0.0",
+  "description": "A local-first app for the Hacktoberfest Touch Grass challenge.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "author": "",
+  "license": "MIT"
+}
