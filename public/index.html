@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GrassQuest</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0fdf4;
+            color: #166534;
+        }
+        h1 {
+            text-align: center;
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+        p {
+            text-align: center;
+            font-size: 1.1rem;
+            max-width: 600px;
+            line-height: 1.5;
+        }
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+            margin-top: 20px;
+        }
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #ccc;
+        }
+        .indicator.loading { background-color: #eab308; }
+        .indicator.ok { background-color: #22c55e; }
+        .indicator.error { background-color: #ef4444; }
+        #message {
+            font-size: 0.95rem;
+            color: #4b5563;
+        }
+    </style>
+</head>
+<body>
+    <h1>🌿 GrassQuest</h1>
+    <p>A local-first app for the Hacktoberfest Touch Grass challenge.</p>
+    
+    <div class="card">
+        <div class="status">
+            <div id="indicator" class="indicator loading"></div>
+            <span id="status-text">Checking Ollama Status...</span>
+        </div>
+        <div id="message">Connecting to local AI engine...</div>
+    </div>
+
+    <script>
+        async function checkHealth() {
+            const indicator = document.getElementById('indicator');
+            const statusText = document.getElementById('status-text');
+            const message = document.getElementById('message');
+
+            try {
+                const response = await fetch('/api/health');
+                const data = await response.json();
+
+                if (response.ok && data.status === 'ok') {
+                    indicator.className = 'indicator ok';
+                    statusText.textContent = 'System Ready';
+                    message.textContent = data.message;
+                    message.style.color = '#15803d';
+                } else {
+                    indicator.className = 'indicator error';
+                    statusText.textContent = 'System Error';
+                    message.textContent = data.message;
+                    message.style.color = '#b91c1c';
+                }
+            } catch (error) {
+                indicator.className = 'indicator error';
+                statusText.textContent = 'Connection Failed';
+                message.textContent = 'Could not reach the server. Is it running?';
+                message.style.color = '#b91c1c';
+            }
+        }
+
+        // Check health on load
+        checkHealth();
+    </script>
+</body>
+</html>
