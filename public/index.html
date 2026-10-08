@@ -34,6 +34,7 @@
             width: 100%;
             max-width: 400px;
             margin-top: 20px;
+            box-sizing: border-box;
         }
         .status {
             display: flex;
@@ -55,13 +56,82 @@
             font-size: 0.95rem;
             color: #4b5563;
         }
+        .form-group {
+            margin-bottom: 15px;
+            display: flex;
+            flex-direction: column;
+        }
+        label {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #166534;
+        }
+        input, select {
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        button {
+            background-color: #166534;
+            color: white;
+            border: none;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 1rem;
+            cursor: pointer;
+            font-weight: bold;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button:disabled {
+            background-color: #a3e635;
+            cursor: not-allowed;
+        }
+        .task-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .task-item {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        .task-title {
+            font-weight: bold;
+            display: block;
+            margin-bottom: 5px;
+        }
+        .task-hint {
+            font-size: 0.9rem;
+            color: #15803d;
+            font-style: italic;
+        }
+        .hidden {
+            display: none !important;
+        }
+        .error-message {
+            color: #ef4444;
+            margin-top: 10px;
+            font-size: 0.95rem;
+            text-align: center;
+        }
+        #quest-title {
+            margin-top: 0;
+            color: #14532d;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
     <h1>🌿 GrassQuest</h1>
     <p>A local-first app for the Hacktoberfest Touch Grass challenge.</p>
     
-    <div class="card">
+    <!-- Health Card -->
+    <div class="card" id="health-card">
         <div class="status">
             <div id="indicator" class="indicator loading"></div>
             <span id="status-text">Checking Ollama Status...</span>
@@ -69,11 +139,43 @@
         <div id="message">Connecting to local AI engine...</div>
     </div>
 
+    <!-- Plan Screen (Form) -->
+    <div class="card" id="plan-card">
+        <h2>Plan your walk</h2>
+        <div class="form-group">
+            <label for="area">Where are you going?</label>
+            <input type="text" id="area" placeholder="e.g. City park, neighborhood, forest" required>
+        </div>
+        <div class="form-group">
+            <label for="season">Season</label>
+            <select id="season">
+                <option value="Autumn">Autumn</option>
+                <option value="Winter">Winter</option>
+                <option value="Spring">Spring</option>
+                <option value="Summer">Summer</option>
+            </select>
+        </div>
+        <div class="form-group">
+            <label for="minutes">How long (minutes)?</label>
+            <input type="number" id="minutes" min="10" max="120" value="30" required>
+        </div>
+        <button id="generate-btn" onclick="generateQuest()">Make my quest</button>
+        <div id="form-error" class="error-message hidden"></div>
+    </div>
+
+    <!-- Active Quest Screen -->
+    <div class="card hidden" id="quest-card">
+        <h2 id="quest-title"></h2>
+        <ul id="task-list" class="task-list"></ul>
+        <button id="new-quest-btn" onclick="clearQuest()" style="background-color: #ef4444; margin-top: 20px;">Abandon & New Quest</button>
+    </div>
+
     <script>
         async function checkHealth() {
             const indicator = document.getElementById('indicator');
             const statusText = document.getElementById('status-text');
             const message = document.getElementById('message');
+            const generateBtn = document.getElementById('generate-btn');
 
             try {
                 const response = await fetch('/api/health');
@@ -89,17 +191,104 @@
                     statusText.textContent = 'System Error';
                     message.textContent = data.message;
                     message.style.color = '#b91c1c';
+                    generateBtn.disabled = true;
                 }
             } catch (error) {
                 indicator.className = 'indicator error';
                 statusText.textContent = 'Connection Failed';
                 message.textContent = 'Could not reach the server. Is it running?';
                 message.style.color = '#b91c1c';
+                generateBtn.disabled = true;
             }
         }
 
-        // Check health on load
-        checkHealth();
+        async function generateQuest() {
+            const area = document.getElementById('area').value;
+            const season = document.getElementById('season').value;
+            const minutes = document.getElementById('minutes').value;
+            const errorDiv = document.getElementById('form-error');
+            const btn = document.getElementById('generate-btn');
+
+            errorDiv.classList.add('hidden');
+
+            if (!area || !season || !minutes) {
+                errorDiv.textContent = 'Please fill out all fields.';
+                errorDiv.classList.remove('hidden');
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Generating... (This may take a minute)';
+
+            try {
+                const response = await fetch('/api/quest', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ area, season, minutes })
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.error || 'Failed to generate quest.');
+                }
+
+                const questData = await response.json();
+                
+                // Save to local storage
+                localStorage.setItem('grassQuest', JSON.stringify(questData));
+                
+                // Render quest
+                renderQuest(questData);
+
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Make my quest';
+            }
+        }
+
+        function renderQuest(questData) {
+            document.getElementById('plan-card').classList.add('hidden');
+            document.getElementById('quest-card').classList.remove('hidden');
+            
+            document.getElementById('quest-title').textContent = questData.title;
+            const taskList = document.getElementById('task-list');
+            taskList.innerHTML = '';
+
+            questData.tasks.forEach(task => {
+                const li = document.createElement('li');
+                li.className = 'task-item';
+                li.innerHTML = `
+                    <span class="task-title">${task.text}</span>
+                    ${task.hint ? `<span class="task-hint">Hint: ${task.hint}</span>` : ''}
+                `;
+                taskList.appendChild(li);
+            });
+        }
+
+        function clearQuest() {
+            localStorage.removeItem('grassQuest');
+            document.getElementById('quest-card').classList.add('hidden');
+            document.getElementById('plan-card').classList.remove('hidden');
+            document.getElementById('area').value = '';
+        }
+
+        function init() {
+            checkHealth();
+            const savedQuest = localStorage.getItem('grassQuest');
+            if (savedQuest) {
+                try {
+                    renderQuest(JSON.parse(savedQuest));
+                } catch (e) {
+                    localStorage.removeItem('grassQuest');
+                }
+            }
+        }
+
+        // Initialize app on load
+        init();
     </script>
 </body>
 </html>

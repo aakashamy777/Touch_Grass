@@ -5,50 +5,122 @@ const http = require('http');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Parse JSON bodies with a 10mb limit
+app.use(express.json({ limit: '10mb' }));
+
 // Serve static files from the public directory
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Helper to call Ollama
+function callOllama(path, method, postData) {
+    return new Promise((resolve, reject) => {
+        const options = {
+            hostname: '127.0.0.1',
+            port: 11434,
+            path: path,
+            method: method,
+            headers: postData ? {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+            } : {}
+        };
+
+        const req = http.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+                resolve({ statusCode: res.statusCode, data });
+            });
+        });
+
+        req.on('error', (e) => reject(e));
+
+        if (postData) {
+            req.write(postData);
+        }
+        req.end();
+    });
+}
+
 // Health check endpoint
-app.get('/api/health', (req, res) => {
-    const options = {
-        hostname: 'localhost',
-        port: 11434,
-        path: '/api/tags',
-        method: 'GET'
-    };
-
-    const request = http.request(options, (response) => {
-        let data = '';
-
-        response.on('data', (chunk) => {
-            data += chunk;
-        });
-
-        response.on('end', () => {
-            if (response.statusCode === 200) {
-                try {
-                    const models = JSON.parse(data).models || [];
-                    const hasModel = models.some(model => model.name === 'gemma3:4b');
-                    
-                    if (hasModel) {
-                        res.json({ status: 'ok', message: 'Ollama is running and gemma3:4b model is available.' });
-                    } else {
-                        res.status(404).json({ status: 'error', message: 'Ollama is running, but gemma3:4b model is missing. Please run: ollama run gemma3:4b' });
-                    }
-                } catch (e) {
-                    res.status(500).json({ status: 'error', message: 'Error parsing Ollama response.' });
-                }
+app.get('/api/health', async (req, res) => {
+    try {
+        const response = await callOllama('/api/tags', 'GET');
+        
+        if (response.statusCode === 200) {
+            const models = JSON.parse(response.data).models || [];
+            const hasModel = models.some(model => model.name === 'gemma3:4b');
+            
+            if (hasModel) {
+                res.json({ status: 'ok', message: 'Ollama is running and gemma3:4b model is available.' });
             } else {
-                res.status(response.statusCode).json({ status: 'error', message: `Ollama returned status code: ${response.statusCode}` });
+                res.status(404).json({ status: 'error', message: 'Ollama is running, but gemma3:4b model is missing. Please run: ollama run gemma3:4b' });
             }
-        });
-    });
-
-    request.on('error', (error) => {
+        } else {
+            res.status(response.statusCode).json({ status: 'error', message: `Ollama returned status code: ${response.statusCode}` });
+        }
+    } catch (e) {
         res.status(503).json({ status: 'error', message: 'Ollama is not running. Please start Ollama first.' });
+    }
+});
+
+// Quest generation endpoint
+app.post('/api/quest', async (req, res) => {
+    const { area, season, minutes } = req.body;
+
+    // Validate inputs
+    if (!area || typeof area !== 'string' || area.trim() === '') {
+        return res.status(400).json({ error: 'Invalid or missing area.' });
+    }
+    if (!season || typeof season !== 'string' || season.trim() === '') {
+        return res.status(400).json({ error: 'Invalid or missing season.' });
+    }
+    const mins = parseInt(minutes, 10);
+    if (isNaN(mins) || mins < 10 || mins > 120) {
+        return res.status(400).json({ error: 'Minutes must be a number between 10 and 120.' });
+    }
+
+    const prompt = `Write a scavenger hunt for a short outdoor walk in a ${area} during ${season}, doable in ${mins} minutes.
+Return ONLY JSON with this exact format:
+{
+  "title": "A fun title for the quest",
+  "tasks": [
+    {"id": 1, "text": "Task description", "hint": "A helpful hint"}
+  ]
+}
+Generate exactly 5 tasks (focus on leaf shapes, textures, sounds, small things to spot). 
+No tasks that need special equipment or going into unsafe places. Do not include markdown formatting or extra text, just the raw JSON object.`;
+
+    const postData = JSON.stringify({
+        model: 'gemma3:4b',
+        prompt: prompt,
+        stream: false,
+        format: 'json'
     });
 
-    request.end();
+    let attempts = 0;
+    const maxAttempts = 2;
+
+    while (attempts < maxAttempts) {
+        attempts++;
+        try {
+            const response = await callOllama('/api/generate', 'POST', postData);
+            
+            if (response.statusCode === 200) {
+                const jsonResponse = JSON.parse(response.data);
+                const questData = JSON.parse(jsonResponse.response);
+                
+                // Validate quest JSON structure
+                if (questData && questData.title && Array.isArray(questData.tasks) && questData.tasks.length === 5) {
+                    return res.json(questData);
+                }
+            }
+        } catch (e) {
+            console.error(`Attempt ${attempts} failed:`, e.message);
+        }
+    }
+
+    return res.status(500).json({ error: 'Failed to generate a valid quest. Please try again.' });
 });
 
 app.listen(PORT, () => {
