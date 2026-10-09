@@ -88,6 +88,9 @@
             background-color: #a3e635;
             cursor: not-allowed;
         }
+        .hidden-file-input {
+            display: none !important;
+        }
         .task-list {
             list-style: none;
             padding: 0;
@@ -99,6 +102,11 @@
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 10px;
+            position: relative;
+        }
+        .task-item.completed {
+            background: #dcfce7;
+            border-color: #4ade80;
         }
         .task-title {
             font-weight: bold;
@@ -119,10 +127,49 @@
             font-size: 0.95rem;
             text-align: center;
         }
+        .feedback {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .feedback-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .feedback.success {
+            background-color: #dcfce7;
+            color: #166534;
+        }
+        .feedback.failure {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        .check-icon {
+            font-weight: bold;
+            font-size: 1.2rem;
+        }
+        .confidence-note {
+            font-size: 0.8rem;
+            color: #854d0e;
+            font-style: italic;
+            margin-left: 22px;
+        }
         #quest-title {
             margin-top: 0;
             color: #14532d;
             text-align: center;
+        }
+        .phone-hint {
+            text-align: center;
+            font-style: italic;
+            color: #6b7280;
+            font-size: 0.9rem;
+            margin-bottom: 15px;
         }
     </style>
 </head>
@@ -166,11 +213,17 @@
     <!-- Active Quest Screen -->
     <div class="card hidden" id="quest-card">
         <h2 id="quest-title"></h2>
+        <p class="phone-hint">Put your phone away between photos.</p>
         <ul id="task-list" class="task-list"></ul>
-        <button id="new-quest-btn" onclick="clearQuest()" style="background-color: #ef4444; margin-top: 20px;">Abandon & New Quest</button>
+        <button id="new-quest-btn" onclick="clearQuest()" style="background-color: #ef4444; margin-top: 10px;">Abandon & New Quest</button>
+    </div>
+        <button id="copy-journal-btn" onclick="copyJournal()" style="background-color: #0ea5e9; margin-top: 20px;">Copy to clipboard 📋</button>
+        <button id="back-quest-btn" onclick="backToQuest()" style="background-color: #64748b; margin-top: 10px;">Back to quest</button>
     </div>
 
     <script>
+        let currentQuest = null;
+
         async function checkHealth() {
             const indicator = document.getElementById('indicator');
             const statusText = document.getElementById('status-text');
@@ -232,14 +285,9 @@
                     throw new Error(errData.error || 'Failed to generate quest.');
                 }
 
-                const questData = await response.json();
-                
-                // Save to local storage
-                localStorage.setItem('grassQuest', JSON.stringify(questData));
-                
-                // Render quest
-                renderQuest(questData);
-
+                currentQuest = await response.json();
+                localStorage.setItem('grassQuest', JSON.stringify(currentQuest));
+                renderQuest();
             } catch (error) {
                 errorDiv.textContent = error.message;
                 errorDiv.classList.remove('hidden');
@@ -249,30 +297,168 @@
             }
         }
 
-        function renderQuest(questData) {
+        function renderQuest() {
+            if (!currentQuest) return;
+
             document.getElementById('plan-card').classList.add('hidden');
             document.getElementById('quest-card').classList.remove('hidden');
             
-            document.getElementById('quest-title').textContent = questData.title;
+            document.getElementById('quest-title').textContent = currentQuest.title;
             const taskList = document.getElementById('task-list');
             taskList.innerHTML = '';
+            
+            let completedCount = 0;
 
-            questData.tasks.forEach(task => {
+            currentQuest.tasks.forEach((task, index) => {
                 const li = document.createElement('li');
                 li.className = 'task-item';
+                if (task.completed) {
+                    li.classList.add('completed');
+                    completedCount++;
+                }
+
+                let feedbackHtml = '';
+                if (task.completed && task.note) {
+                    const unsureNote = (task.confidence === 'low' || task.confidence === 'medium') ? `<div class="confidence-note">(Gemma is not sure)</div>` : '';
+                    feedbackHtml = `
+                        <div class="feedback success">
+                            <div class="feedback-row">
+                                <span class="check-icon">✓</span>
+                                <span>${task.note}</span>
+                            </div>
+                            ${unsureNote}
+                        </div>
+                    `;
+                }
+
                 li.innerHTML = `
                     <span class="task-title">${task.text}</span>
                     ${task.hint ? `<span class="task-hint">Hint: ${task.hint}</span>` : ''}
+                    ${feedbackHtml}
+                    <div id="error-${index}" class="error-message hidden"></div>
                 `;
+
+                if (!task.completed) {
+                    const btnWrap = document.createElement('div');
+                    btnWrap.style.marginTop = '10px';
+                    
+                    const btnText = document.createElement('button');
+                    btnText.id = `btn-text-${index}`;
+                    btnText.textContent = 'Take photo 📷';
+
+                    const fileInput = document.createElement('input');
+                    fileInput.type = 'file';
+                    fileInput.accept = 'image/*';
+                    fileInput.capture = 'environment';
+                    fileInput.className = 'hidden-file-input';
+                    fileInput.onchange = (e) => handlePhotoUpload(e, index, task.text);
+
+                    btnText.onclick = () => fileInput.click();
+
+                    btnWrap.appendChild(btnText);
+                    btnWrap.appendChild(fileInput);
+
+                    li.appendChild(btnWrap);
+                }
+
                 taskList.appendChild(li);
             });
+
+
         }
 
         function clearQuest() {
             localStorage.removeItem('grassQuest');
+            currentQuest = null;
             document.getElementById('quest-card').classList.add('hidden');
             document.getElementById('plan-card').classList.remove('hidden');
             document.getElementById('area').value = '';
+        }
+
+        async function handlePhotoUpload(event, taskIndex, taskText) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const errorDiv = document.getElementById(`error-${taskIndex}`);
+            const btnText = document.getElementById(`btn-text-${taskIndex}`);
+            
+            errorDiv.classList.add('hidden');
+            btnText.textContent = 'Analyzing...';
+            
+            try {
+                const base64Image = await resizeImage(file, 1024);
+
+                const response = await fetch('/api/check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ taskText, imageBase64: base64Image })
+                });
+
+                if (!response.ok) {
+                    const errData = await response.json();
+                    throw new Error(errData.error || 'Failed to check photo.');
+                }
+
+                const checkData = await response.json();
+
+                if (checkData.matchesTask) {
+                    currentQuest.tasks[taskIndex].completed = true;
+                    currentQuest.tasks[taskIndex].note = checkData.note;
+                    currentQuest.tasks[taskIndex].confidence = checkData.confidence;
+                    localStorage.setItem('grassQuest', JSON.stringify(currentQuest));
+                    renderQuest();
+                } else {
+                    errorDiv.innerHTML = `<div class="feedback failure"><div class="feedback-row">Not quite! ${checkData.note} Try again.</div></div>`;
+                    errorDiv.classList.remove('hidden');
+                    btnText.textContent = 'Take photo 📷';
+                }
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.classList.remove('hidden');
+                btnText.textContent = 'Take photo 📷';
+            }
+        }
+
+        function resizeImage(file, maxDimension) {
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                const objectUrl = URL.createObjectURL(file);
+                
+                img.onload = () => {
+                    URL.revokeObjectURL(objectUrl);
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height) {
+                        if (width > maxDimension) {
+                            height = Math.round(height * maxDimension / width);
+                            width = maxDimension;
+                        }
+                    } else {
+                        if (height > maxDimension) {
+                            width = Math.round(width * maxDimension / height);
+                            height = maxDimension;
+                        }
+                    }
+
+                    const canvas = document.createElement('canvas');
+                    canvas.width = width;
+                    canvas.height = height;
+
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                    resolve(dataUrl);
+                };
+                
+                img.onerror = () => {
+                    URL.revokeObjectURL(objectUrl);
+                    reject(new Error("This photo format isn't supported. Try a JPEG or PNG photo."));
+                };
+                
+                img.src = objectUrl;
+            });
         }
 
         function init() {
@@ -280,14 +466,14 @@
             const savedQuest = localStorage.getItem('grassQuest');
             if (savedQuest) {
                 try {
-                    renderQuest(JSON.parse(savedQuest));
+                    currentQuest = JSON.parse(savedQuest);
+                    renderQuest();
                 } catch (e) {
                     localStorage.removeItem('grassQuest');
                 }
             }
         }
 
-        // Initialize app on load
         init();
     </script>
 </body>

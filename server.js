@@ -88,8 +88,8 @@ Return ONLY JSON with this exact format:
     {"id": 1, "text": "Task description", "hint": "A helpful hint"}
   ]
 }
-Generate exactly 5 tasks (focus on leaf shapes, textures, sounds, small things to spot). 
-No tasks that need special equipment or going into unsafe places. Do not include markdown formatting or extra text, just the raw JSON object.`;
+Generate exactly 5 tasks. EVERY task MUST be something the user can PHOTOGRAPH (e.g., a specific leaf shape, bark texture, a flower, a bird or insect, a stone, a puddle reflection). DO NOT include tasks about sounds, smells, or feelings.
+CRITICAL: Tasks must be about things that realistically exist in the given area and season. If you are unsure what grows there, use generic things (a leaf with a pointed tip, rough bark, a small insect, a puddle, a flower). No tasks that need special equipment or going into unsafe places. Do not include markdown formatting or extra text, just the raw JSON object.`;
 
     const postData = JSON.stringify({
         model: 'gemma3:4b',
@@ -116,11 +116,79 @@ No tasks that need special equipment or going into unsafe places. Do not include
                 }
             }
         } catch (e) {
-            console.error(`Attempt ${attempts} failed:`, e.message);
+            console.error(`Attempt ${attempts} failed for quest generation:`, e.message);
         }
     }
 
     return res.status(500).json({ error: 'Failed to generate a valid quest. Please try again.' });
+});
+
+// Photo checking endpoint
+app.post('/api/check', async (req, res) => {
+    let { taskText, imageBase64 } = req.body;
+
+    if (!taskText || typeof taskText !== 'string' || taskText.trim() === '') {
+        return res.status(400).json({ error: 'Invalid or missing task text.' });
+    }
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
+        return res.status(400).json({ error: 'Invalid or missing image data.' });
+    }
+
+    // Strip data: prefix if present
+    if (imageBase64.startsWith('data:image/')) {
+        const parts = imageBase64.split(',');
+        if (parts.length === 2) {
+            imageBase64 = parts[1];
+        }
+    }
+
+    // Validate size (~5MB max base64 size is roughly 7,000,000 chars)
+    if (imageBase64.length > 7000000) {
+        return res.status(400).json({ error: 'Image is too large. Max size is ~5MB.' });
+    }
+
+    const prompt = `Look at this photo. What is the main subject? Does it satisfy this task: "${taskText}"?
+Be strict about species-specific tasks. If the photo clearly shows what the task asks, set matchesTask to true. If it only looks similar or you cannot tell, set matchesTask to false and say what you see.
+Return ONLY JSON with this exact format:
+{
+  "identified": "What you see in the photo",
+  "matchesTask": true,
+  "confidence": "high",
+  "note": "One friendly sentence explaining why it matches or not."
+}
+For confidence, use exactly "high", "medium", or "low". Do not include markdown formatting or extra text, just the raw JSON object.`;
+
+    const postData = JSON.stringify({
+        model: 'gemma3:4b',
+        prompt: prompt,
+        images: [imageBase64],
+        stream: false,
+        format: 'json'
+    });
+
+    let attempts = 0;
+    const maxAttempts = 2;
+
+    while (attempts < maxAttempts) {
+        attempts++;
+        try {
+            const response = await callOllama('/api/generate', 'POST', postData);
+            
+            if (response.statusCode === 200) {
+                const jsonResponse = JSON.parse(response.data);
+                const checkData = JSON.parse(jsonResponse.response);
+                
+                // Validate response JSON structure
+                if (checkData && typeof checkData.identified === 'string' && typeof checkData.matchesTask === 'boolean' && typeof checkData.note === 'string') {
+                    return res.json(checkData);
+                }
+            }
+        } catch (e) {
+            console.error(`Attempt ${attempts} failed for photo checking:`, e.message);
+        }
+    }
+
+    return res.status(500).json({ error: 'Failed to check the photo. Please try again.' });
 });
 
 app.listen(PORT, () => {
