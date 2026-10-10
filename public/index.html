@@ -164,6 +164,16 @@
             color: #14532d;
             text-align: center;
         }
+        .journal-text {
+            white-space: pre-wrap;
+            line-height: 1.6;
+            color: #1f2937;
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            font-size: 0.95rem;
+        }
         .phone-hint {
             text-align: center;
             font-style: italic;
@@ -215,8 +225,14 @@
         <h2 id="quest-title"></h2>
         <p class="phone-hint">Put your phone away between photos.</p>
         <ul id="task-list" class="task-list"></ul>
+        <button id="journal-btn" class="hidden" onclick="generateJournal()" style="background-color: #0284c7; margin-top: 20px;">Write my field journal 📖</button>
         <button id="new-quest-btn" onclick="clearQuest()" style="background-color: #ef4444; margin-top: 10px;">Abandon & New Quest</button>
     </div>
+
+    <!-- Journal Screen -->
+    <div class="card hidden" id="journal-card">
+        <h2 style="text-align: center; color: #14532d; margin-top: 0;">My Field Journal</h2>
+        <div id="journal-content" class="journal-text"></div>
         <button id="copy-journal-btn" onclick="copyJournal()" style="background-color: #0ea5e9; margin-top: 20px;">Copy to clipboard 📋</button>
         <button id="back-quest-btn" onclick="backToQuest()" style="background-color: #64748b; margin-top: 10px;">Back to quest</button>
     </div>
@@ -301,6 +317,7 @@
             if (!currentQuest) return;
 
             document.getElementById('plan-card').classList.add('hidden');
+            document.getElementById('journal-card').classList.add('hidden');
             document.getElementById('quest-card').classList.remove('hidden');
             
             document.getElementById('quest-title').textContent = currentQuest.title;
@@ -364,13 +381,19 @@
                 taskList.appendChild(li);
             });
 
-
+            const journalBtn = document.getElementById('journal-btn');
+            if (completedCount > 0) {
+                journalBtn.classList.remove('hidden');
+            } else {
+                journalBtn.classList.add('hidden');
+            }
         }
 
         function clearQuest() {
             localStorage.removeItem('grassQuest');
             currentQuest = null;
             document.getElementById('quest-card').classList.add('hidden');
+            document.getElementById('journal-card').classList.add('hidden');
             document.getElementById('plan-card').classList.remove('hidden');
             document.getElementById('area').value = '';
         }
@@ -459,6 +482,57 @@
                 
                 img.src = objectUrl;
             });
+        }
+
+        async function generateJournal() {
+            const btn = document.getElementById('journal-btn');
+            btn.disabled = true;
+            btn.textContent = 'Writing...';
+
+            const completedTasks = currentQuest.tasks
+                .filter(t => t.completed)
+                .map(t => ({ task: t.text, note: t.note }));
+
+            try {
+                const response = await fetch('/api/journal', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ title: currentQuest.title, completed: completedTasks })
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to generate journal.');
+                }
+
+                const data = await response.json();
+                
+                document.getElementById('quest-card').classList.add('hidden');
+                document.getElementById('journal-card').classList.remove('hidden');
+                
+                document.getElementById('journal-content').innerText = data.markdown;
+
+            } catch (error) {
+                alert(error.message);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Write my field journal 📖';
+            }
+        }
+
+        function copyJournal() {
+            const text = document.getElementById('journal-content').innerText;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.getElementById('copy-journal-btn');
+                btn.textContent = 'Copied! ✅';
+                setTimeout(() => { btn.textContent = 'Copy to clipboard 📋'; }, 2000);
+            }).catch(() => {
+                alert("Failed to copy text.");
+            });
+        }
+
+        function backToQuest() {
+            document.getElementById('journal-card').classList.add('hidden');
+            document.getElementById('quest-card').classList.remove('hidden');
         }
 
         function init() {

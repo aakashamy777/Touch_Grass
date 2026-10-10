@@ -191,6 +191,57 @@ For confidence, use exactly "high", "medium", or "low". Do not include markdown 
     return res.status(500).json({ error: 'Failed to check the photo. Please try again.' });
 });
 
+// Journal generation endpoint
+app.post('/api/journal', async (req, res) => {
+    const { title, completed } = req.body;
+
+    if (!title || !Array.isArray(completed) || completed.length === 0) {
+        return res.status(400).json({ error: 'Invalid journal data. Need a title and at least one completed task.' });
+    }
+
+    const tasksStr = completed.map(c => `- Task: ${c.task}\n  Note: ${c.note}`).join('\n');
+    const prompt = `Write a short, warm field journal entry in the first person ("I") in Markdown (about 100 words) for a quest called "${title}".
+Here is what I completed (task and my photo notes):
+${tasksStr}
+
+CRITICAL RULES:
+- ONLY use facts provided in the tasks and notes above.
+- DO NOT invent dates, weather, sounds, textures, feelings about specific objects, or facts about trees/places that are not in the input.
+- DO NOT mention any date at all.
+- Keep the tone simple and warm.
+- End with one concrete suggestion for next time that ONLY refers to the things already mentioned in this quest.
+
+Return ONLY JSON with this exact format:
+{
+  "markdown": "The journal text here"
+}
+Do not include markdown formatting around the JSON, just the raw JSON object.`;
+
+    const postData = JSON.stringify({
+        model: 'gemma3:4b',
+        prompt: prompt,
+        stream: false,
+        format: 'json',
+        options: {
+            temperature: 0.4
+        }
+    });
+
+    try {
+        const response = await callOllama('/api/generate', 'POST', postData);
+        if (response.statusCode === 200) {
+            const jsonResponse = JSON.parse(response.data);
+            const journalData = JSON.parse(jsonResponse.response);
+            if (journalData && typeof journalData.markdown === 'string') {
+                return res.json(journalData);
+            }
+        }
+    } catch (e) {
+        console.error('Failed to generate journal:', e.message);
+    }
+    return res.status(500).json({ error: 'Failed to generate field journal. Please try again.' });
+});
+
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });
